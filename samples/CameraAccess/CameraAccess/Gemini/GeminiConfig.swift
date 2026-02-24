@@ -12,7 +12,13 @@ enum GeminiConfig {
   static let videoFrameInterval: TimeInterval = 1.0
   static let videoJPEGQuality: CGFloat = 0.5
 
-  static var systemInstruction: String { SettingsManager.shared.geminiSystemPrompt }
+  static func systemInstruction(for mode: ToolMode) -> String {
+    let customPrompt = SettingsManager.shared.geminiSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !customPrompt.isEmpty && customPrompt != defaultSystemInstruction {
+      return customPrompt
+    }
+    return mode == .openclawEnabled ? defaultSystemInstruction : defaultVoiceOnlySystemInstruction
+  }
 
   static let defaultSystemInstruction = """
     You are an AI assistant for someone wearing Meta Ray-Ban smart glasses. You can see through their camera and have a voice conversation. Keep responses concise and natural.
@@ -40,6 +46,13 @@ enum GeminiConfig {
     Never call execute silently -- the user needs verbal confirmation that you heard them and are working on it. The tool may take several seconds to complete, so the acknowledgment lets them know something is happening.
 
     For messages, confirm recipient and content before delegating unless clearly urgent.
+    """
+
+  static let defaultVoiceOnlySystemInstruction = """
+    You are an AI assistant for someone wearing Meta Ray-Ban smart glasses. You can see through their camera and have a voice conversation. Keep responses concise and natural.
+
+    You currently have no external action tools. You cannot send messages, browse the web, set reminders, or update lists right now.
+    If the user asks for an action you cannot perform, explain that action tools are unavailable and offer a helpful voice-only response instead.
     """
 
   // User-configurable values (Settings screen overrides, falling back to Secrets.swift)

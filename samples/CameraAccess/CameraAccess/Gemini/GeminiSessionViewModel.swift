@@ -11,6 +11,7 @@ class GeminiSessionViewModel: ObservableObject {
   @Published var aiTranscript: String = ""
   @Published var toolCallStatus: ToolCallStatus = .idle
   @Published var openClawConnectionState: OpenClawConnectionState = .notConfigured
+  @Published var toolMode: ToolMode = .voiceOnly
   private let geminiService = GeminiLiveService()
   private let openClawBridge = OpenClawBridge()
   private var toolCallRouter: ToolCallRouter?
@@ -85,26 +86,32 @@ class GeminiSessionViewModel: ObservableObject {
     // Check OpenClaw connectivity and start fresh session
     await openClawBridge.checkConnection()
     openClawBridge.resetSession()
+    toolMode = openClawBridge.connectionState == .connected ? .openclawEnabled : .voiceOnly
 
-    // Wire tool call handling
-    toolCallRouter = ToolCallRouter(bridge: openClawBridge)
+    if toolMode == .openclawEnabled {
+      toolCallRouter = ToolCallRouter(bridge: openClawBridge)
 
-    geminiService.onToolCall = { [weak self] toolCall in
-      guard let self else { return }
-      Task { @MainActor in
-        for call in toolCall.functionCalls {
-          self.toolCallRouter?.handleToolCall(call) { [weak self] response in
-            self?.geminiService.sendToolResponse(response)
+      geminiService.onToolCall = { [weak self] toolCall in
+        guard let self else { return }
+        Task { @MainActor in
+          for call in toolCall.functionCalls {
+            self.toolCallRouter?.handleToolCall(call) { [weak self] response in
+              self?.geminiService.sendToolResponse(response)
+            }
           }
         }
       }
-    }
 
-    geminiService.onToolCallCancellation = { [weak self] cancellation in
-      guard let self else { return }
-      Task { @MainActor in
-        self.toolCallRouter?.cancelToolCalls(ids: cancellation.ids)
+      geminiService.onToolCallCancellation = { [weak self] cancellation in
+        guard let self else { return }
+        Task { @MainActor in
+          self.toolCallRouter?.cancelToolCalls(ids: cancellation.ids)
+        }
       }
+    } else {
+      toolCallRouter = nil
+      geminiService.onToolCall = nil
+      geminiService.onToolCallCancellation = nil
     }
 
     // Observe service state
@@ -130,7 +137,10 @@ class GeminiSessionViewModel: ObservableObject {
     }
 
     // Connect to Gemini and wait for setupComplete
-    let setupOk = await geminiService.connect()
+    let setupOk = await geminiService.connect(
+      toolMode: toolMode,
+      systemInstruction: GeminiConfig.systemInstruction(for: toolMode)
+    )
 
     if !setupOk {
       let msg: String

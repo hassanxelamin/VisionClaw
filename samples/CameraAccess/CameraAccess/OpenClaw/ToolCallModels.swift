@@ -1,5 +1,14 @@
 import Foundation
 
+enum ToolMode: Equatable {
+  case openclawEnabled
+  case voiceOnly
+
+  var hasTools: Bool {
+    self == .openclawEnabled
+  }
+}
+
 // MARK: - Gemini Tool Call (parsed from server JSON)
 
 struct GeminiFunctionCall {
@@ -84,7 +93,8 @@ enum ToolCallStatus: Equatable {
 
 enum ToolDeclarations {
 
-  static func allDeclarations() -> [[String: Any]] {
+  static func allDeclarations(for mode: ToolMode) -> [[String: Any]] {
+    guard mode.hasTools else { return [] }
     return [execute]
   }
 

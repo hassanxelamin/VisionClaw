@@ -30,6 +30,8 @@ class GeminiLiveService: ObservableObject {
   private var webSocketTask: URLSessionWebSocketTask?
   private var receiveTask: Task<Void, Never>?
   private var connectContinuation: CheckedContinuation<Bool, Never>?
+  private var configuredToolMode: ToolMode = .voiceOnly
+  private var configuredSystemInstruction: String = GeminiConfig.defaultVoiceOnlySystemInstruction
   private let delegate = WebSocketDelegate()
   private var urlSession: URLSession!
   private let sendQueue = DispatchQueue(label: "gemini.send", qos: .userInitiated)
@@ -40,12 +42,14 @@ class GeminiLiveService: ObservableObject {
     self.urlSession = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
   }
 
-  func connect() async -> Bool {
+  func connect(toolMode: ToolMode, systemInstruction: String) async -> Bool {
     guard let url = GeminiConfig.websocketURL() else {
       connectionState = .error("No API key configured")
       return false
     }
 
+    configuredToolMode = toolMode
+    configuredSystemInstruction = systemInstruction
     connectionState = .connecting
 
     let result = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
@@ -164,40 +168,43 @@ class GeminiLiveService: ObservableObject {
   }
 
   private func sendSetupMessage() {
-    let setup: [String: Any] = [
-      "setup": [
-        "model": GeminiConfig.model,
-        "generationConfig": [
-          "responseModalities": ["AUDIO"],
-          "thinkingConfig": [
-            "thinkingBudget": 0
-          ]
+    var setupPayload: [String: Any] = [
+      "model": GeminiConfig.model,
+      "generationConfig": [
+        "responseModalities": ["AUDIO"],
+        "thinkingConfig": [
+          "thinkingBudget": 0
+        ]
+      ],
+      "systemInstruction": [
+        "parts": [
+          ["text": configuredSystemInstruction]
+        ]
+      ],
+      "realtimeInputConfig": [
+        "automaticActivityDetection": [
+          "disabled": false,
+          "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
+          "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
+          "silenceDurationMs": 500,
+          "prefixPaddingMs": 40
         ],
-        "systemInstruction": [
-          "parts": [
-            ["text": GeminiConfig.systemInstruction]
-          ]
-        ],
-        "tools": [
-          [
-            "functionDeclarations": ToolDeclarations.allDeclarations()
-          ]
-        ],
-        "realtimeInputConfig": [
-          "automaticActivityDetection": [
-            "disabled": false,
-            "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
-            "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-            "silenceDurationMs": 500,
-            "prefixPaddingMs": 40
-          ],
-          "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
-          "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
-        ],
-        "inputAudioTranscription": [:] as [String: Any],
-        "outputAudioTranscription": [:] as [String: Any]
-      ]
+        "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
+        "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
+      ],
+      "inputAudioTranscription": [:] as [String: Any],
+      "outputAudioTranscription": [:] as [String: Any]
     ]
+
+    if configuredToolMode.hasTools {
+      setupPayload["tools"] = [
+        [
+          "functionDeclarations": ToolDeclarations.allDeclarations(for: configuredToolMode)
+        ]
+      ]
+    }
+
+    let setup: [String: Any] = ["setup": setupPayload]
     sendJSON(setup)
   }
 
