@@ -4,12 +4,24 @@ struct GeminiStatusBar: View {
   @ObservedObject var geminiVM: GeminiSessionViewModel
 
   var body: some View {
-    HStack(spacing: 8) {
-      // Gemini connection pill
-      StatusPill(color: geminiStatusColor, text: geminiStatusText)
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 8) {
+        // Gemini connection pill
+        StatusPill(color: geminiStatusColor, text: geminiStatusText)
 
-      // OpenClaw connection pill
-      StatusPill(color: openClawStatusColor, text: openClawStatusText)
+        // OpenClaw connection pill
+        StatusPill(color: openClawStatusColor, text: openClawStatusText)
+      }
+
+      if let fallbackText = openClawFallbackText {
+        Text(fallbackText)
+          .font(.system(size: 12))
+          .foregroundColor(.white.opacity(0.9))
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .background(Color.black.opacity(0.6))
+          .cornerRadius(12)
+      }
     }
   }
 
@@ -44,8 +56,25 @@ struct GeminiStatusBar: View {
     switch geminiVM.openClawConnectionState {
     case .connected: return "OpenClaw"
     case .checking: return "OpenClaw..."
-    case .unreachable: return "OpenClaw Off"
+    case .unreachable: return "OpenClaw Down"
     case .notConfigured: return "No OpenClaw"
+    }
+  }
+
+  private var openClawFallbackText: String? {
+    switch geminiVM.openClawConnectionState {
+    case .connected:
+      return nil
+    case .checking:
+      return "Checking action tools. Voice-only responses will continue."
+    case .notConfigured:
+      return "Action tools are not configured. Voice-only mode is active."
+    case .unreachable(let reason):
+      let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed.isEmpty {
+        return "Action tools are unavailable. Voice-only mode is active."
+      }
+      return "Action tools unavailable (\(trimmed)). Voice-only mode is active."
     }
   }
 }
