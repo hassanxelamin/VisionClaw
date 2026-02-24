@@ -34,7 +34,10 @@ struct SettingsView: View {
             .frame(minHeight: 200)
         }
 
-        Section(header: Text("OpenClaw"), footer: Text("Connect to an OpenClaw gateway running on your Mac for agentic tool-calling.")) {
+        Section(
+          header: Text("OpenClaw"),
+          footer: Text("Connect to an OpenClaw gateway for agentic tool-calling. If unavailable, Gemini stays in voice-only mode.")
+        ) {
           VStack(alignment: .leading, spacing: 4) {
             Text("Host")
               .font(.caption)
