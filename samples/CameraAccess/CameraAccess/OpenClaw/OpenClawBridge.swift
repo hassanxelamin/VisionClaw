@@ -36,24 +36,24 @@ class OpenClawBridge: ObservableObject {
       return
     }
     connectionState = .checking
-    guard let url = URL(string: "\(GeminiConfig.openClawHost):\(GeminiConfig.openClawPort)/v1/chat/completions") else {
+    guard let healthURL = URL(string: "\(GeminiConfig.openClawHost):\(GeminiConfig.openClawPort)/health") else {
       connectionState = .unreachable("Invalid URL")
       return
     }
-    var request = URLRequest(url: url)
+    var request = URLRequest(url: healthURL)
     request.httpMethod = "GET"
-    request.setValue("Bearer \(GeminiConfig.openClawGatewayToken)", forHTTPHeaderField: "Authorization")
     do {
       let (_, response) = try await pingSession.data(for: request)
-      if let http = response as? HTTPURLResponse, (200...499).contains(http.statusCode) {
+      if let http = response as? HTTPURLResponse, (200...399).contains(http.statusCode) {
         connectionState = .connected
         NSLog("[OpenClaw] Gateway reachable (HTTP %d)", http.statusCode)
       } else {
         connectionState = .unreachable("Unexpected response")
       }
     } catch {
-      connectionState = .unreachable(error.localizedDescription)
-      NSLog("[OpenClaw] Gateway unreachable: %@", error.localizedDescription)
+      let normalized = normalizedConnectivityError(error)
+      connectionState = .unreachable(normalized)
+      NSLog("[OpenClaw] Gateway unreachable: %@", normalized)
     }
   }
 
@@ -76,7 +76,14 @@ class OpenClawBridge: ObservableObject {
   ) async -> ToolResult {
     lastToolCallStatus = .executing(toolName)
 
+    guard GeminiConfig.isOpenClawConfigured else {
+      connectionState = .notConfigured
+      lastToolCallStatus = .failed(toolName, "OpenClaw not configured")
+      return .failure("OpenClaw is not configured.")
+    }
+
     guard let url = URL(string: "\(GeminiConfig.openClawHost):\(GeminiConfig.openClawPort)/v1/chat/completions") else {
+      connectionState = .unreachable("Invalid URL")
       lastToolCallStatus = .failed(toolName, "Invalid URL")
       return .failure("Invalid gateway URL")
     }
@@ -91,6 +98,7 @@ class OpenClawBridge: ObservableObject {
 
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
+    request.timeoutInterval = 45
     request.setValue("Bearer \(GeminiConfig.openClawGatewayToken)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue(sessionKey, forHTTPHeaderField: "x-openclaw-session-key")
@@ -112,6 +120,7 @@ class OpenClawBridge: ObservableObject {
         let code = httpResponse?.statusCode ?? 0
         let bodyStr = String(data: data, encoding: .utf8) ?? "no body"
         NSLog("[OpenClaw] Chat failed: HTTP %d - %@", code, String(bodyStr.prefix(200)))
+        connectionState = .unreachable("HTTP \(code)")
         lastToolCallStatus = .failed(toolName, "HTTP \(code)")
         return .failure("Agent returned HTTP \(code)")
       }
@@ -123,6 +132,7 @@ class OpenClawBridge: ObservableObject {
          let content = message["content"] as? String {
         // Append assistant response to history for continuity
         conversationHistory.append(["role": "assistant", "content": content])
+        connectionState = .connected
         NSLog("[OpenClaw] Agent result: %@", String(content.prefix(200)))
         lastToolCallStatus = .completed(toolName)
         return .success(content)
@@ -130,13 +140,34 @@ class OpenClawBridge: ObservableObject {
 
       let raw = String(data: data, encoding: .utf8) ?? "OK"
       conversationHistory.append(["role": "assistant", "content": raw])
+      connectionState = .connected
       NSLog("[OpenClaw] Agent raw: %@", String(raw.prefix(200)))
       lastToolCallStatus = .completed(toolName)
       return .success(raw)
     } catch {
-      NSLog("[OpenClaw] Agent error: %@", error.localizedDescription)
-      lastToolCallStatus = .failed(toolName, error.localizedDescription)
-      return .failure("Agent error: \(error.localizedDescription)")
+      let normalized = normalizedConnectivityError(error)
+      connectionState = .unreachable(normalized)
+      NSLog("[OpenClaw] Agent error: %@", normalized)
+      lastToolCallStatus = .failed(toolName, normalized)
+      return .failure("Agent error: \(normalized)")
     }
+  }
+
+  // MARK: - Connectivity Error Normalization
+
+  private func normalizedConnectivityError(_ error: Error) -> String {
+    if let urlError = error as? URLError {
+      switch urlError.code {
+      case .timedOut:
+        return "Request timed out"
+      case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+        return "Host unreachable"
+      case .networkConnectionLost, .notConnectedToInternet:
+        return "Network unavailable"
+      default:
+        return urlError.localizedDescription
+      }
+    }
+    return error.localizedDescription
   }
 }
